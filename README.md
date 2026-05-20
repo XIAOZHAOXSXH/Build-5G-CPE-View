@@ -46,9 +46,9 @@ opkg install /tmp/luci-app-5g-cpe-view_*.ipk
 
 | 架构 | 说明 | 常见设备 |
 |------|------|----------|
-| x86_64 | x86 64位 | 软路由、虚拟机 |
+| x86/64 | x86 64位 | 软路由、虚拟机 |
 | armsr/armv8 | ARM 64位 | 树莓派4、Rockchip 等 |
-| mediatek/mt7622 | MediaTek MT7622 | MT7622 平台路由器 |
+| mediatek/filogic | MediaTek Filogic | MT7981/MT7986 平台路由器 |
 | ramips/mt7621 | MediaTek MT7621 | 新路由3、竞斗云、K2P 等 |
 
 > 如果没有你需要的架构，可以 Fork 本仓库后自行修改 `.github/workflows/build.yml` 中的构建矩阵，添加对应的目标架构。

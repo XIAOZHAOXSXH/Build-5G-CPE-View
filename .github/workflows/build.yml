@@ -21,7 +21,7 @@ jobs:
           - target: armsr
             subtarget: armv8
           - target: mediatek
-            subtarget: mt7622
+            subtarget: filogic
           - target: ramips
             subtarget: mt7621
 
@@ -31,12 +31,24 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 python3-distutils
+          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 python3-distutils wget file
 
       - name: Download OpenWrt SDK
         run: |
-          SDK_URL="https://downloads.openwrt.org/releases/23.05.3/targets/${{ matrix.target }}/${{ matrix.subtarget }}/openwrt-sdk-23.05.3-${{ matrix.target }}-${{ matrix.subtarget }}_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-          echo "Downloading SDK from: $SDK_URL"
+          TARGET="${{ matrix.target }}"
+          SUBTARGET="${{ matrix.subtarget }}"
+          BASE_URL="https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}"
+
+          # Try to find the SDK file from the downloads page
+          SDK_FILE=$(wget -qO- "${BASE_URL}/" | grep -oP 'openwrt-sdk-[^"]+\.tar\.xz' | head -1)
+
+          if [ -z "$SDK_FILE" ]; then
+            echo "ERROR: Could not find SDK file for ${TARGET}/${SUBTARGET}"
+            exit 1
+          fi
+
+          SDK_URL="${BASE_URL}/${SDK_FILE}"
+          echo "Downloading: $SDK_URL"
           wget -q "$SDK_URL" -O sdk.tar.xz
           mkdir -p sdk
           tar -xf sdk.tar.xz --strip-components=1 -C sdk
@@ -52,11 +64,13 @@ jobs:
           mkdir -p package/luci-app-5g-cpe-view
           cp -r "${GITHUB_WORKSPACE}/luci-app-5g-cpe-view/"* package/luci-app-5g-cpe-view/
 
-          # Prepare default config
-          cat > .config << EOF
+          # Prepare default config (no leading spaces)
+          cat > .config <<EOF
           CONFIG_TARGET_${{ matrix.target }}=y
           CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y
           EOF
+          # Remove leading whitespace from config
+          sed -i 's/^[[:space:]]*//' .config
 
           make defconfig
 
@@ -68,8 +82,7 @@ jobs:
       - name: Collect IPK files
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/output"
-          find sdk/bin/packages/ -name "luci-app-5g-cpe-view*.ipk" -exec cp {} "${GITHUB_WORKSPACE}/output/" \; 2>/dev/null || true
-          find sdk/bin/ -name "luci-app-5g-cpe-view*.ipk" -exec cp {} "${GITHUB_WORKSPACE}/output/" \; 2>/dev/null || true
+          find sdk/bin/ -name "luci-app-5g-cpe-view*.ipk" -exec cp {} "${GITHUB_WORKSPACE}/output/" \;
           ls -la "${GITHUB_WORKSPACE}/output/"
 
       - name: Upload artifact
