@@ -1,0 +1,117 @@
+<%#
+  LuCI - Lua Configuration Interface
+  5G CPE View - Huawei 5G Modem Web Panel
+  Copyright (C) 2024-2026 XIAOZHAOXSXH
+-%>
+
+<%
+  local uci = luci.model.uci.cursor()
+  local ip   = uci:get("5g_cpe_view", "settings", "ip") or "192.168.66.1"
+  local port = uci:get("5g_cpe_view", "settings", "port") or "6677"
+
+  local ports = { "80", "6677", "8080" }
+  local is_custom = true
+  for _, p in ipairs(ports) do
+    if p == port then is_custom = false end
+  end
+
+  local iframe_url = "http://" .. ip .. ":" .. port
+-%>
+
+<%+header%>
+
+<script type="text/javascript">
+//<![CDATA[
+function updateUrl() {
+  var ip   = document.getElementById('cbid.ip').value.trim();
+  var port = document.getElementById('cbid.port').value;
+  var customPort = document.getElementById('cbid.custom_port');
+
+  if (port === 'custom') {
+    port = customPort.value.trim() || '6677';
+    customPort.style.display = '';
+  } else {
+    customPort.style.display = 'none';
+  }
+
+  if (!ip) ip = '192.168.66.1';
+  var url = 'http://' + ip + ':' + port;
+  document.getElementById('cpe_iframe').src = url;
+  document.getElementById('current_url').textContent = url;
+
+  // Save settings via XHR
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', '<%=url("admin/services/5g_cpe_view/save")%>?ip=' + encodeURIComponent(ip) + '&port=' + encodeURIComponent(port), true);
+  xhr.send();
+}
+
+function onPortChange() {
+  var port = document.getElementById('cbid.port').value;
+  var customPort = document.getElementById('cbid.custom_port');
+  customPort.style.display = (port === 'custom') ? '' : 'none';
+  updateUrl();
+}
+
+window.onload = function() {
+  var port = '<%=port%>';
+  var ports = ['80', '6677', '8080'];
+  var sel = document.getElementById('cbid.port');
+  var found = false;
+  for (var i = 0; i < ports.length; i++) {
+    if (ports[i] === port) { sel.value = port; found = true; break; }
+  }
+  if (!found) {
+    sel.value = 'custom';
+    document.getElementById('cbid.custom_port').value = port;
+    document.getElementById('cbid.custom_port').style.display = '';
+  }
+};
+//]]>
+</script>
+
+<style>
+.cpe-panel { background: #fff; border-radius: 4px; padding: 0; }
+.cpe-settings { background: #f7f7f7; border: 1px solid #ddd; border-radius: 4px; padding: 15px 20px; margin-bottom: 15px; }
+.cpe-settings label { font-weight: bold; margin-right: 8px; }
+.cpe-settings select, .cpe-settings input[type="text"] { padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; }
+.cpe-settings input[type="text"] { width: 100px; }
+.cpe-iframe-wrap { border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+.cpe-iframe-wrap iframe { width: 100%; height: calc(100vh - 320px); min-height: 500px; border: none; display: block; }
+.cpe-current-url { color: #666; font-size: 12px; margin-top: 5px; }
+.cpe-footer { text-align: center; padding: 18px 0 12px; margin-top: 15px; border-top: 1px solid #eee; font-size: 14px; }
+.cpe-footer a { color: #ff6600; text-decoration: none; font-weight: bold; }
+.cpe-footer a:hover { text-decoration: underline; color: #e55d00; }
+</style>
+
+<div class="cbi-map">
+  <h2 name="content"><%:5G CPE View%></h2>
+  <div class="cbi-section">
+    <div class="cpe-panel">
+      <div class="cpe-settings">
+        <label><%:Modem IP Address%>:</label>
+        <input type="text" id="cbid.ip" value="<%=ip%>" placeholder="192.168.66.1" />
+        &nbsp;&nbsp;
+        <label><%:Port%>:</label>
+        <select id="cbid.port" onchange="onPortChange()">
+          <option value="80">80</option>
+          <option value="6677" selected="selected">6677</option>
+          <option value="8080">8080</option>
+          <option value="custom"><%:Custom%></option>
+        </select>
+        <input type="text" id="cbid.custom_port" value="" placeholder="<%:Custom Port%>" style="display:none;" />
+        &nbsp;&nbsp;
+        <input type="button" class="cbi-button cbi-button-apply" value="<%:Apply%>" onclick="updateUrl()" />
+        <div class="cpe-current-url"><%:Current URL%>: <span id="current_url"><%=iframe_url%></span></div>
+      </div>
+      <div class="cpe-iframe-wrap">
+        <iframe id="cpe_iframe" src="<%=iframe_url%>"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cpe-footer">
+  <%:Author%>: <a href="https://www.goofish.com/personal?userId=2207876641359" target="_blank">闲鱼：小赵先生</a>
+</div>
+
+<%+footer%>
