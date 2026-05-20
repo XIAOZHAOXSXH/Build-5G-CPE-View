@@ -2,7 +2,6 @@ name: Build IPK
 
 on:
   push:
-    branches: [ main ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
@@ -32,10 +31,9 @@ jobs:
               | grep -oP 'href="\K[^/]+(?=/")' | sort -u)
 
             for SUBTARGET in $SUBTARGETS; do
-              # Verify SDK exists for this combination
-              SDK_EXISTS=$(curl -sI "https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}/" \
-                | head -1 | grep -c "200\|301\|302" || true)
-              if [ "$SDK_EXISTS" = "0" ]; then
+              # Verify this target page actually exists
+              HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}/")
+              if [ "$HTTP_CODE" != "200" ]; then
                 continue
               fi
 
@@ -51,7 +49,7 @@ jobs:
           MATRIX="${MATRIX}]}"
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
           echo "Discovered targets:"
-          echo "$MATRIX" | python3 -m json.tool
+          echo "$MATRIX" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 
   # ── Step 2: Build IPK for every discovered target ──
   build:
@@ -68,7 +66,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 python3-distutils wget file rsync
+          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 wget file rsync
 
       - name: Download OpenWrt SDK
         run: |
