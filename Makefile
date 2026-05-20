@@ -33,9 +33,9 @@ define Package/luci-app-5g-cpe-view/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/5g_cpe_view
 	$(INSTALL_DIR) $(1)/etc/config
 
-	$(INSTALL_DATA) ./luasrc/controller/5g_cpe_view.lua $(1)/usr/lib/lua/luci/controller/
-	$(INSTALL_DATA) ./luasrc/view/5g_cpe_view/main.htm $(1)/usr/lib/lua/luci/view/5g_cpe_view/
-	$(INSTALL_CONF) ./root/etc/config/5g_cpe_view $(1)/etc/config/
+	$(INSTALL_DATA) ./files/controller/5g_cpe_view.lua $(1)/usr/lib/lua/luci/controller/
+	$(INSTALL_DATA) ./files/view/5g_cpe_view/main.htm $(1)/usr/lib/lua/luci/view/5g_cpe_view/
+	$(INSTALL_CONF) ./files/config/5g_cpe_view $(1)/etc/config/
 endef
 
 $(eval $(call BuildPackage,luci-app-5g-cpe-view))
