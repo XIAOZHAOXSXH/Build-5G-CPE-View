@@ -1,158 +1,77 @@
 name: Build IPK
 
 on:
+  workflow_dispatch:
   push:
     tags: [ 'v*' ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
-  # ── Step 1: Discover all available targets from OpenWrt downloads ──
-  discover-targets:
-    name: Discover architectures
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: Fetch all target/subtarget pairs
-        id: set-matrix
-        run: |
-          # Fetch the top-level targets page
-          TARGETS=$(curl -sL "https://downloads.openwrt.org/releases/23.05.3/targets/" \
-            | grep -oP 'href="\K[^/]+(?=/")' | sort -u)
-
-          MATRIX='{"include":['
-          FIRST=true
-
-          for TARGET in $TARGETS; do
-            # Fetch subtargets for this target
-            SUBTARGETS=$(curl -sL "https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/" \
-              | grep -oP 'href="\K[^/]+(?=/")' | sort -u)
-
-            for SUBTARGET in $SUBTARGETS; do
-              # Verify this target page actually exists
-              HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}/")
-              if [ "$HTTP_CODE" != "200" ]; then
-                continue
-              fi
-
-              if [ "$FIRST" = true ]; then
-                FIRST=false
-              else
-                MATRIX="${MATRIX},"
-              fi
-              MATRIX="${MATRIX}{\"target\":\"${TARGET}\",\"subtarget\":\"${SUBTARGET}\"}"
-            done
-          done
-
-          MATRIX="${MATRIX}]}"
-          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
-          echo "Discovered targets:"
-          echo "$MATRIX" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
-
-  # ── Step 2: Build IPK for every discovered target ──
   build:
-    name: Build ${{ matrix.target }}/${{ matrix.subtarget }}
-    needs: discover-targets
+    name: Build 5G CPE View IPK
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.discover-targets.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Setup OpenWrt SDK
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 wget file rsync
+          echo "Downloading SDK..."
+          wget -qO- https://downloads.immortalwrt.org/releases/23.05.1/targets/x86/64/immortalwrt-sdk-23.05.1-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz | tar xJf -
+          mv immortalwrt-sdk-* sdk
 
-      - name: Download OpenWrt SDK
+      - name: Update Feeds
+        working-directory: ./sdk
         run: |
-          TARGET="${{ matrix.target }}"
-          SUBTARGET="${{ matrix.subtarget }}"
-          BASE_URL="https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}"
-
-          # Find the SDK archive from the downloads page
-          SDK_FILE=$(curl -sL "${BASE_URL}/" | grep -oP 'href="\K(openwrt-sdk-[^"]+\.tar\.xz)' | head -1)
-
-          if [ -z "$SDK_FILE" ]; then
-            echo "::warning::No SDK found for ${TARGET}/${SUBTARGET}, skipping."
-            echo "SKIP_BUILD=true" >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          SDK_URL="${BASE_URL}/${SDK_FILE}"
-          echo "Downloading: $SDK_URL"
-          wget -q "$SDK_URL" -O sdk.tar.xz
-          mkdir -p sdk
-          tar -xf sdk.tar.xz --strip-components=1 -C sdk
-          rm sdk.tar.xz
-
-      - name: Setup SDK
-        if: env.SKIP_BUILD != 'true'
-        run: |
-          cd sdk
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # Add our package
-          mkdir -p package/luci-app-5g-cpe-view
-          cp -r "${GITHUB_WORKSPACE}/luci-app-5g-cpe-view/"* package/luci-app-5g-cpe-view/
-
-          # Prepare minimal config (no leading spaces)
-          cat > .config <<EOF
-          CONFIG_TARGET_${{ matrix.target }}=y
-          CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y
-          EOF
-          sed -i 's/^[[:space:]]*//' .config
-
-          make defconfig
-
-      - name: Build package
-        if: env.SKIP_BUILD != 'true'
+      - name: Prepare Package
+        working-directory: ./sdk
         run: |
-          cd sdk
+          mkdir -p package/luci-app-5g-cpe-view
+          rsync -av --exclude='sdk' --exclude='.git' --exclude='.github' $GITHUB_WORKSPACE/ package/luci-app-5g-cpe-view/
+
+      - name: Compile Package
+        working-directory: ./sdk
+        run: |
+          make defconfig
           make package/luci-app-5g-cpe-view/compile V=s
 
-      - name: Collect IPK files
-        if: env.SKIP_BUILD != 'true'
+      - name: Find and Organize Output
         run: |
-          mkdir -p "${GITHUB_WORKSPACE}/output"
-          find sdk/bin/ -name "luci-app-5g-cpe-view*.ipk" -exec cp {} "${GITHUB_WORKSPACE}/output/" \;
-          ls -la "${GITHUB_WORKSPACE}/output/" || echo "No IPK files found"
+          mkdir -p output
+          find sdk/bin/packages -name "luci-app-5g-cpe-view*.ipk" -exec cp {} output/ \;
+          echo "Build result:"
+          ls -l output/
 
-      - name: Upload artifact
-        if: env.SKIP_BUILD != 'true'
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ matrix.target }}-${{ matrix.subtarget }}
+          name: luci-app-5g-cpe-view-ipk
           path: output/*.ipk
-          retention-days: 30
 
-  # ── Step 3: Create Release (only on tag push) ──
   release:
-    name: Create Release
+    name: Upload to Release
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-          merge-multiple: true
+          name: luci-app-5g-cpe-view-ipk
+          path: artifact
 
-      - name: List artifacts
-        run: find artifacts -type f -name "*.ipk" | sort
-
-      - name: Create Release and Upload IPKs
+      - name: Create Release and Upload IPK
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.ipk
+          files: artifact/*.ipk
           generate_release_notes: true
           draft: false
           prerelease: false

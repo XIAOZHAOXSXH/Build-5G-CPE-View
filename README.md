@@ -42,25 +42,11 @@ opkg install /tmp/luci-app-5g-cpe-view_*.ipk
 2. 进入 **系统 → 软件包**
 3. 点击 **上传软件包**，选择下载的 `.ipk` 文件安装
 
-## 已编译架构
+## 兼容架构
 
-CI 会**自动发现并编译 OpenWrt 23.05.3 的全部架构**，包括但不限于：
+本插件为**通用架构（all）**，仅包含 Lua 脚本、HTML 模板和 UCI 配置，**一个 ipk 适用于所有 OpenWrt 架构**，无需区分平台。
 
-| 架构 | 常见设备 |
-|------|----------|
-| x86/64 | 软路由、虚拟机 |
-| armsr/armv8 | 树莓派4、Rockchip 等 ARM64 设备 |
-| ath79/generic | TP-Link、Netgear 等 Atheros 平台 |
-| mediatek/filogic | MT7981/MT7986 平台路由器 |
-| mediatek/mt7622 | MT7622 平台路由器 |
-| ramips/mt7621 | 新路由3、竞斗云、K2P 等 |
-| ramips/mt76x8 | 极路由、小米路由器等 |
-| bcm27xx/bcm2711 | 树莓派 4B |
-| ipq40xx | Qualcomm IPQ40xx 平台 |
-| mvebu/cortexa53 | Marvell ESPRESSObin 等 |
-| sunxi/cortexa53 | 全志 H5/H6 等 |
-
-> 完整列表请查看 [GitHub Actions 构建日志](https://github.com/XIAOZHAOXSXH/Build-5G-CPE-View/actions)，首次构建时会自动扫描所有可用目标。
+支持：x86_64、ARM、MIPS、RISC-V 等所有运行 OpenWrt（18.06+）的设备。
 
 ## 使用说明
 
