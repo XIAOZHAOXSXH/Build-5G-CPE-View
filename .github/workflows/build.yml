@@ -9,21 +9,58 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ── Step 1: Discover all available targets from OpenWrt downloads ──
+  discover-targets:
+    name: Discover architectures
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Fetch all target/subtarget pairs
+        id: set-matrix
+        run: |
+          # Fetch the top-level targets page
+          TARGETS=$(curl -sL "https://downloads.openwrt.org/releases/23.05.3/targets/" \
+            | grep -oP 'href="\K[^/]+(?=/")' | sort -u)
+
+          MATRIX='{"include":['
+          FIRST=true
+
+          for TARGET in $TARGETS; do
+            # Fetch subtargets for this target
+            SUBTARGETS=$(curl -sL "https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/" \
+              | grep -oP 'href="\K[^/]+(?=/")' | sort -u)
+
+            for SUBTARGET in $SUBTARGETS; do
+              # Verify SDK exists for this combination
+              SDK_EXISTS=$(curl -sI "https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}/" \
+                | head -1 | grep -c "200\|301\|302" || true)
+              if [ "$SDK_EXISTS" = "0" ]; then
+                continue
+              fi
+
+              if [ "$FIRST" = true ]; then
+                FIRST=false
+              else
+                MATRIX="${MATRIX},"
+              fi
+              MATRIX="${MATRIX}{\"target\":\"${TARGET}\",\"subtarget\":\"${SUBTARGET}\"}"
+            done
+          done
+
+          MATRIX="${MATRIX}]}"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "Discovered targets:"
+          echo "$MATRIX" | python3 -m json.tool
+
+  # ── Step 2: Build IPK for every discovered target ──
   build:
     name: Build ${{ matrix.target }}/${{ matrix.subtarget }}
+    needs: discover-targets
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: x86
-            subtarget: 64
-          - target: armsr
-            subtarget: armv8
-          - target: mediatek
-            subtarget: filogic
-          - target: ramips
-            subtarget: mt7621
+      matrix: ${{ fromJson(needs.discover-targets.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +68,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 python3-distutils wget file
+          sudo apt-get install -y build-essential libncurses5-dev gawk git libssl-dev gettext unzip python3 python3-distutils wget file rsync
 
       - name: Download OpenWrt SDK
         run: |
@@ -39,12 +76,13 @@ jobs:
           SUBTARGET="${{ matrix.subtarget }}"
           BASE_URL="https://downloads.openwrt.org/releases/23.05.3/targets/${TARGET}/${SUBTARGET}"
 
-          # Try to find the SDK file from the downloads page
-          SDK_FILE=$(wget -qO- "${BASE_URL}/" | grep -oP 'openwrt-sdk-[^"]+\.tar\.xz' | head -1)
+          # Find the SDK archive from the downloads page
+          SDK_FILE=$(curl -sL "${BASE_URL}/" | grep -oP 'href="\K(openwrt-sdk-[^"]+\.tar\.xz)' | head -1)
 
           if [ -z "$SDK_FILE" ]; then
-            echo "ERROR: Could not find SDK file for ${TARGET}/${SUBTARGET}"
-            exit 1
+            echo "::warning::No SDK found for ${TARGET}/${SUBTARGET}, skipping."
+            echo "SKIP_BUILD=true" >> "$GITHUB_ENV"
+            exit 0
           fi
 
           SDK_URL="${BASE_URL}/${SDK_FILE}"
@@ -55,6 +93,7 @@ jobs:
           rm sdk.tar.xz
 
       - name: Setup SDK
+        if: env.SKIP_BUILD != 'true'
         run: |
           cd sdk
           ./scripts/feeds update -a
@@ -64,34 +103,37 @@ jobs:
           mkdir -p package/luci-app-5g-cpe-view
           cp -r "${GITHUB_WORKSPACE}/luci-app-5g-cpe-view/"* package/luci-app-5g-cpe-view/
 
-          # Prepare default config (no leading spaces)
+          # Prepare minimal config (no leading spaces)
           cat > .config <<EOF
           CONFIG_TARGET_${{ matrix.target }}=y
           CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y
           EOF
-          # Remove leading whitespace from config
           sed -i 's/^[[:space:]]*//' .config
 
           make defconfig
 
       - name: Build package
+        if: env.SKIP_BUILD != 'true'
         run: |
           cd sdk
           make package/luci-app-5g-cpe-view/compile V=s
 
       - name: Collect IPK files
+        if: env.SKIP_BUILD != 'true'
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/output"
           find sdk/bin/ -name "luci-app-5g-cpe-view*.ipk" -exec cp {} "${GITHUB_WORKSPACE}/output/" \;
-          ls -la "${GITHUB_WORKSPACE}/output/"
+          ls -la "${GITHUB_WORKSPACE}/output/" || echo "No IPK files found"
 
       - name: Upload artifact
+        if: env.SKIP_BUILD != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ipk-${{ matrix.target }}-${{ matrix.subtarget }}
           path: output/*.ipk
           retention-days: 30
 
+  # ── Step 3: Create Release (only on tag push) ──
   release:
     name: Create Release
     needs: build
